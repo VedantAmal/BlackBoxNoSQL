@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Scoreboard - {{ ctf_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .scoreboard-table { 
+        font-size: 0.95rem;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    .scoreboard-table thead th {
+        background-color: var(--bs-secondary-bg);
+        border-bottom: 2px solid var(--bs-border-color);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+        color: var(--bs-secondary);
+        padding: 12px 16px;
+    }
+    .scoreboard-table tbody tr {
+        border-bottom: 1px solid var(--bs-border-color);
+        transition: background-color 0.2s;
+    }
+    .scoreboard-table tbody tr:hover {
+        background-color: var(--bs-secondary-bg);
+    }
+    .scoreboard-table tbody td {
+        padding: 12px 16px;
+        vertical-align: middle;
+        color: var(--bs-body-color);
+    }
+    .rank-cell {
+        font-weight: 600;
+        color: var(--bs-secondary);
+        width: 60px;
+        text-align: center;
+    }
+    .rank-1 { color: #FFD700 !important; }
+    .rank-2 { color: #C0C0C0 !important; }
+    .rank-3 { color: #CD7F32 !important; }
+    .team-name {
+        font-weight: 500;
+        color: var(--bs-body-color);
+    }
+    .team-affiliation {
+        font-size: 0.85rem;
+        color: var(--bs-secondary);
+        margin-top: 2px;
+    }
+    .score-cell {
+        font-weight: 600;
+        font-size: 1.1rem;
+        color: var(--bs-primary);
+        width: 100px;
+        text-align: right;
+    }
+    .score-negative {
+        color: var(--bs-danger) !important;
+    }
+    .solves-cell {
+        width: 80px;
+        text-align: center;
+        color: var(--bs-secondary);
+    }
+    .time-cell {
+        width: 140px;
+        font-size: 0.85rem;
+        color: var(--bs-secondary);
+    }
+    .live-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        background-color: var(--bs-success);
+        color: white;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    .live-dot {
+        width: 8px;
+        height: 8px;
+        background-color: white;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    .card {
+        border: 1px solid var(--bs-border-color);
+        background-color: var(--bs-body-bg);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Dark theme specific adjustments */
+    [data-bs-theme="dark"] .scoreboard-table thead th {
+        background-color: var(--bs-dark);
+        color: var(--bs-light);
+    }
+    [data-bs-theme="dark"] .scoreboard-table tbody tr:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+    [data-bs-theme="dark"] .team-name {
+        color: var(--bs-light);
+    }
+    [data-bs-theme="dark"] .card {
+        background-color: var(--bs-dark);
+        border-color: var(--bs-border-color);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">Scoreboard</h2>
+    <div class="live-indicator">
+        <span class="live-dot"></span>
+        <span>LIVE</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table scoreboard-table mb-0" id="scoreboardTable">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>{% if teams_enabled %}Team{% else %}User{% endif %}</th>
+                    <th class="text-end">Score</th>
+                    <th class="text-center">Solves</th>
+                </tr>
+            </thead>
+            <tbody id="scoreboardBody">
+                <tr>
+                    <td colspan="4" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Toast for new solves -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="solveToast" class="toast hide" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header bg-success text-white">
+            <strong class="me-auto">New Solve!</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="solveToastBody"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let socket;
+let scoreboardData = [];
+
+// Connect to WebSocket
+function connectWebSocket() {
+    socket = io('/live', {
+        transports: ['websocket', 'polling']
+    });
+    
+    socket.on('connect', function() {
+        console.log('Connected to live updates');
+        socket.emit('join_scoreboard');
+        socket.emit('request_scoreboard');
+    });
+    
+    socket.on('scoreboard_update', function(data) {
+        console.log('Scoreboard update received', data);
+        scoreboardData = data;
+        updateScoreboardTable();
+    });
+    
+    socket.on('new_solve', function(data) {
+        console.log('New solve:', data);
+        showSolveToast(data);
+        socket.emit('request_scoreboard');
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('Disconnected from live updates');
+    });
+}
+
+// Update scoreboard table - Clean CTFd-style
+function updateScoreboardTable() {
+    const tbody = document.getElementById('scoreboardBody');
+    tbody.innerHTML = '';
+    
+    if (scoreboardData.length === 0) {
+        // Show loading state if no data received yet
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading scoreboard...</span>
+                    </div>
+                    <div class="mt-2 text-muted">Loading scoreboard...</div>
+                </td>
+            </tr>`;
+        return;
+    }
+    
+    scoreboardData.forEach((team, index) => {
+        const tr = document.createElement('tr');
+        
+        // Rank - Simple number with color for top 3
+        const rankTd = document.createElement('td');
+        rankTd.className = 'rank-cell';
+        if (team.rank <= 3) {
+            rankTd.classList.add(`rank-${team.rank}`);
+        }
+        rankTd.textContent = team.rank;
+        
+        // Team name
+        const nameTd = document.createElement('td');
+        let nameHtml = `<div class="team-name">${escapeHtml(team.name)}</div>`;
+        if (team.affiliation) {
+            nameHtml += `<div class="team-affiliation">${escapeHtml(team.affiliation)}</div>`;
+        }
+        nameTd.innerHTML = nameHtml;
+        
+        // Score - Simple number
+        const scoreTd = document.createElement('td');
+        scoreTd.className = 'score-cell';
+        if (team.score < 0) {
+            scoreTd.classList.add('score-negative');
+        }
+        scoreTd.textContent = team.score;
+        
+        // Solves - Simple number
+        const solvesTd = document.createElement('td');
+        solvesTd.className = 'solves-cell';
+        solvesTd.textContent = team.solves;
+        
+        tr.appendChild(rankTd);
+        tr.appendChild(nameTd);
+        tr.appendChild(scoreTd);
+        tr.appendChild(solvesTd);
+        
+        tbody.appendChild(tr);
+    });
+}
+
+// Show toast notification for new solve
+function showSolveToast(data) {
+    const toastBody = document.getElementById('solveToastBody');
+    toastBody.innerHTML = `<strong>${escapeHtml(data.team || data.user)}</strong> solved <strong>${escapeHtml(data.challenge)}</strong> for ${data.points} points`;
+    
+    const toast = new bootstrap.Toast(document.getElementById('solveToast'));
+    toast.show();
+}
+
+// Utility functions
+function escapeHtml(text) {
+    const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+function formatDate(date) {
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+    
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Load scoreboard data immediately via REST API (fast)
+    fetch('/scoreboard/api/data')
+        .then(response => response.json())
+        .then(data => {
+            scoreboardData = data;
+            updateScoreboardTable();
+        })
+        .catch(error => {
+            console.error('Error loading scoreboard:', error);
+            const tbody = document.getElementById('scoreboardBody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center text-danger py-4">
+                        <i class="bi bi-exclamation-triangle"></i> Error loading scoreboard
+                    </td>
+                </tr>`;
+        });
+    
+    // Then connect WebSocket for live updates
+    connectWebSocket();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+
+{% block title %}{{ challenge.name }} - {{ ctf_name }}{% endblock %}
+
+{% block content %}
+<style>
+.act-unlock-toast {
+    min-width: 320px;
+    max-width: 400px;
+    border-left: 4px solid #0d6efd;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    pointer-events: auto;
+}
+
+.act-unlock-toast .toast-header {
+    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+    border: none;
+}
+
+.act-unlock-toast .toast-body {
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    padding: 1rem;
+    font-size: 0.95rem;
+}
+
+.act-unlock-toast .toast-body h6 {
+    color: #0d6efd;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+/* Toast container that doesn't block interactions */
+.toast-container {
+    pointer-events: none;
+}
+
+@keyframes slideInFromRight {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutToRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
+
+.act-unlock-toast.show {
+    animation: slideInFromRight 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.act-unlock-toast.hiding {
+    animation: slideOutToRight 0.3s cubic-bezier(0.55, 0.055, 0.675, 0.19);
+}
+</style>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h3 class="mb-0">
+                        {{ challenge.name }}
+                        {% if challenge.solved %}
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        {% endif %}
+                    </h3>
+                    <span class="badge bg-warning text-dark fs-5">{{ challenge.points }} pts</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <span class="badge bg-primary me-2">{{ challenge.category|upper }}</span>
+                    {% if challenge.difficulty %}
+                    <span class="badge 
+                        {% if challenge.difficulty == 'easy' %}bg-success
+                        {% elif challenge.difficulty == 'medium' %}bg-warning
+                        {% else %}bg-danger
+                        {% endif %}">
+                        {{ challenge.difficulty|upper }}
+                    </span>
+                    {% endif %}
+                    {% if challenge.author %}
+                    <span class="badge bg-secondary ms-2">
+                        <i class="bi bi-person"></i> {{ challenge.author }}
+                    </span>
+                    {% endif %}
+                </div>
+                
+                <hr>
+                
+                <div class="challenge-description mb-4">
+                    <h5>Description</h5>
+                    <p style="white-space: pre-wrap;">{{ challenge.description }}</p>
+                    
+                    {% if images and images|length > 0 %}
+                    <div class="challenge-images mt-3 mb-3">
+                        {% for image in images %}
+                        <div class="mb-3">
+                            <img src="{{ image.url }}" alt="{{ image.original_filename }}" class="img-fluid rounded" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open('{{ image.url }}', '_blank')">
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if challenge.connection_info %}
+                    <p class="mt-2">
+                        {% if challenge.connection_info.startswith('http://') or challenge.connection_info.startswith('https://') %}
+                            <code class="connection-info"><a href="{{ challenge.connection_info }}" target="_blank" rel="noopener noreferrer">{{ challenge.connection_info }}</a></code>
+                        {% else %}
+                            <code class="connection-info">{{ challenge.connection_info }}</code>
+                        {% endif %}
+                    </p>
+                    {% endif %}
+                </div>
+                
+                {% if challenge.docker_enabled and not challenge.solved %}
+                <!-- Docker Container Panel (hidden after solving) -->
+                <div class="mb-4">
+                    {% include 'components/container_panel.html' %}
+                </div>
+                {% endif %}
+                
+                {% if files and files|length > 0 %}
+                <div class="mb-4">
+                    <h5><i class="bi bi-file-earmark-arrow-down"></i> Downloads</h5>
+                    <div class="list-group">
+                        {% for file in files %}
+                        <a href="{{ file.download_url }}" class="list-group-item list-group-item-action" download="{{ file.original_filename }}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <i class="bi bi-download me-2"></i>
+                                    <strong>{{ file.original_filename }}</strong>
+                                </div>
+                                <span class="badge bg-secondary">{{ file.size_formatted }}</span>
+                            </div>
+                            {% if file.file_hash %}
+                            <small class="text-muted">SHA256: {{ file.file_hash[:16] }}...</small>
+                            {% endif %}
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if hints and hints|length > 0 %}
+                <div class="mb-4">
+                    <h5><i class="bi bi-lightbulb"></i> Hints</h5>
+                    <div id="hints-container">
+                        {% for hint in hints %}
+                        <div class="card mb-2" id="hint-{{ hint.id }}">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="flex-grow-1">
+                                        {% if hint.unlocked %}
+                                        <div class="hint-content">
+                                            <i class="bi bi-check-circle-fill text-success"></i>
+                                            <strong>Hint {{ hint.order }}</strong>
+                                            <span class="badge bg-success ms-2">Unlocked</span>
+                                            <p class="mb-0 mt-2">{{ hint.content }}</p>
+                                        </div>
+                                        {% else %}
+                                        <div class="hint-locked">
+                                            <i class="bi bi-lock-fill text-warning"></i>
+                                            <strong>Hint {{ hint.order }}</strong>
+                                            <span class="badge bg-warning text-dark ms-2">{{ hint.cost }} points</span>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% if not hint.unlocked %}
+                                    <button class="btn btn-sm btn-warning" onclick="unlockHint({{ hint.id }}, {{ hint.cost }})">
+                                        <i class="bi bi-unlock"></i> Unlock
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if not challenge.solved %}
+                <hr>
+                <div>
+                    <h5>Submit Flag</h5>
+                    <form id="flagForm" onsubmit="submitFlag(event)">
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="flagInput" 
+                                   placeholder="CYS{...}" required>
+                            <button class="btn btn-primary" type="submit" id="submitBtn">
+                                <i class="bi bi-flag-fill"></i> Submit
+                            </button>
+                        </div>
+                    </form>
+                    <div id="submitResult"></div>
+                </div>
+                {% else %}
+                <div class="alert alert-success">
+                    <i class="bi bi-trophy-fill"></i> You have already solved this challenge!
+                </div>
+                
+                {% if challenge.has_branching %}
+                <hr>
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="bi bi-diagram-3"></i> Explore More Paths
+                        </h5>
+                        <p class="text-muted mb-3">
+                            This challenge has multiple solution paths. Submit different flags to unlock new challenges!
+                            <span class="badge bg-info">No points awarded for additional flags</span>
+                        </p>
+                        <form id="exploreFlagForm" onsubmit="submitExploreFlag(event)">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="exploreFlagInput" 
+                                       placeholder="Try a different flag..." required>
+                                <button class="btn btn-outline-primary" type="submit" id="exploreSubmitBtn">
+                                    <i class="bi bi-search"></i> Explore
+                                </button>
+                            </div>
+                        </form>
+                        <div id="exploreResult" class="mt-3"></div>
+                        
+                        {% if challenge.unlocked_paths and challenge.unlocked_paths|length > 0 %}
+                        <div class="mt-3">
+                            <h6>Paths Unlocked:</h6>
+                            <div class="list-group">
+                                {% for path in challenge.unlocked_paths %}
+                                <div class="list-group-item">
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                    <strong>{{ path.challenge_name }}</strong>
+                                    <span class="badge bg-secondary">{{ path.category }}</span>
+                                    <small class="text-muted">via {{ path.flag_label or 'flag' }}</small>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-info-circle"></i> Challenge Info</h5>
+                <ul class="list-unstyled mb-0">
+                    <li class="mb-2">
+                        <strong>Points:</strong> 
+                        <span class="badge bg-warning text-dark">{{ challenge.points }}</span>
+                        {% if challenge.is_dynamic %}
+                        <small class="text-muted">(Dynamic)</small>
+                        {% endif %}
+                    </li>
+                    <li class="mb-2">
+                        <strong>Category:</strong> {{ challenge.category }}
+                    </li>
+                    {% if challenge.difficulty %}
+                    <li class="mb-2">
+                        <strong>Difficulty:</strong> {{ challenge.difficulty|capitalize }}
+                    </li>
+                    {% endif %}
+                    <li class="list-group-item">
+                        <strong>Solves:</strong> {{ challenge.solves }}
+                    </li>
+                    {% if challenge.solver_count > 0 %}
+                    <li class="list-group-item">
+                        <strong>Solved by:</strong>
+                        <div class="mt-2">
+                            {% for solver in challenge.solvers %}
+                                <span class="badge bg-secondary me-1 mb-1">
+                                    {% if solver.is_team %}
+                                        <i class="bi bi-people-fill"></i>
+                                    {% else %}
+                                        <i class="bi bi-person-fill"></i>
+                                    {% endif %}
+                                    {{ solver.name }}
+                                </span>
+                            {% endfor %}
+                        </div>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('challenges.list_challenges') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Challenges
+    </a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function unlockHint(hintId, cost) {
+    if (!confirm(`Unlock this hint for ${cost} points? Your score will be deducted.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/hints/${hintId}/unlock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update hint display
+            const hintCard = document.getElementById(`hint-${hintId}`);
+            if (hintCard) {
+                hintCard.querySelector('.card-body').innerHTML = `
+                    <div class="hint-content">
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        <strong>Hint</strong>
+                        <span class="badge bg-success ms-2">Unlocked</span>
+                        <p class="mb-0 mt-2">${data.content}</p>
+                    </div>
+                `;
+            }
+            
+            // Show success message
+            showMessage('success', data.message);
+            
+            // Optionally reload to update score display
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            showMessage('danger', data.message || 'Failed to unlock hint');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        showMessage('danger', 'An error occurred while unlocking the hint');
+    }
+}
+
+function showMessage(type, message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    const container = document.querySelector('.card-body');
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    setTimeout(() => alertDiv.remove(), 5000);
+}
+
+async function submitFlag(event) {
+    event.preventDefault();
+    
+    const flagInput = document.getElementById('flagInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const resultDiv = document.getElementById('submitResult');
+    
+    const flag = flagInput.value.trim();
+    
+    if (!flag) {
+        return;
+    }
+    
+    // Disable button during submission
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Submitting...';
+    
+    try {
+        const response = await fetch('{{ url_for("challenges.submit_flag", challenge_id=challenge.id) }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `flag=${encodeURIComponent(flag)}`
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success alert-dismissible fade show">
+                    <i class="bi bi-check-circle-fill"></i> ${data.message}
+                    <br><strong>Points earned: ${data.points}</strong>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            
+            // Show ACT unlock toast notification if present
+            if (data.unlocked_act) {
+                showActUnlockToast(data.unlocked_act);
+            }
+            
+            // Reload page after 2 seconds to show solved status
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger alert-dismissible fade show">
+                    <i class="bi bi-x-circle-fill"></i> ${data.message}
+                    ${data.remaining_attempts !== undefined ? 
+                      `<br><small>Remaining attempts: ${data.remaining_attempts}</small>` : ''}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            
+            // Reset button
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-flag-fill"></i> Submit';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle-fill"></i> An error occurred. Please try again.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="bi bi-flag-fill"></i> Submit';
+    }
+}
+
+async function submitExploreFlag(event) {
+    event.preventDefault();
+    
+    const flagInput = document.getElementById('exploreFlagInput');
+    const flag = flagInput.value.trim();
+    const resultDiv = document.getElementById('exploreResult');
+    
+    if (!flag) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-warning alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle-fill"></i> Please enter a flag.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        return;
+    }
+    
+    // Show loading state
+    resultDiv.innerHTML = `
+        <div class="alert alert-info">
+            <span class="spinner-border spinner-border-sm"></span> Checking flag...
+        </div>
+    `;
+    
+    try {
+        const response = await fetch('{{ url_for("challenges.explore_flag", challenge_id=challenge.id) }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `flag=${encodeURIComponent(flag)}`
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let message = `<div class="alert alert-success alert-dismissible fade show">
+                <i class="bi bi-check-circle-fill"></i> ${data.message}`;
+            
+            if (data.unlocked_challenges && data.unlocked_challenges.length > 0) {
+                message += '<br><strong>New paths unlocked:</strong><ul class="mb-0 mt-2">';
+                data.unlocked_challenges.forEach(challenge => {
+                    message += `<li><i class="bi bi-unlock-fill text-success"></i> ${challenge.name} (${challenge.category})</li>`;
+                });
+                message += '</ul>';
+            }
+            
+            message += '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+            resultDiv.innerHTML = message;
+            
+            // Clear input
+            flagInput.value = '';
+            
+            // Reload page after 3 seconds to show unlocked paths
+            if (data.unlocked_challenges && data.unlocked_challenges.length > 0) {
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            }
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger alert-dismissible fade show">
+                    <i class="bi bi-x-circle-fill"></i> ${data.message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger alert-dismissible fade show">
+                <i class="bi bi-exclamation-triangle-fill"></i> An error occurred. Please try again.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+    }
+}
+
+// Function to show ACT unlock toast notification
+function showActUnlockToast(actName) {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.getElementById('actUnlockToastContainer');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'actUnlockToastContainer';
+        toastContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
+        toastContainer.style.zIndex = '9999';
+        document.body.appendChild(toastContainer);
+    }
+    
+    // Create toast element
+    const toastId = 'actUnlockToast-' + Date.now();
+    const toastHTML = `
+        <div id="${toastId}" class="toast act-unlock-toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header text-white">
+                <i class="bi bi-unlock-fill me-2"></i>
+                <strong class="me-auto">New Chapter Unlocked!</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                <h6>${actName} Unlocked!</h6>
+                <p class="mb-0 small">Check the sidebar to explore new challenges!</p>
+            </div>
+        </div>
+    `;
+    
+    toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+    
+    // Initialize and show the toast
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement, {
+        autohide: true,
+        delay: 4500
+    });
+    toast.show();
+    
+    // Add hiding class before removal for smooth exit animation
+    toastElement.addEventListener('hide.bs.toast', () => {
+        toastElement.classList.add('hiding');
+    });
+    
+    // Remove toast element after it's hidden
+    toastElement.addEventListener('hidden.bs.toast', () => {
+        toastElement.remove();
+    });
+}
+</script>
+{% endblock %}

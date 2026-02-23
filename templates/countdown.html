@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} - {{ ctf_name }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-lg">
+                <div class="card-body text-center p-5">
+                    <div class="mb-4">
+                        <i class="bi bi-clock-history" style="font-size: 4rem; color: #0d6efd;"></i>
+                    </div>
+                    
+                    <h2 class="mb-3">{{ page_title }} Coming Soon!</h2>
+                    <p class="text-muted mb-4">The event hasn't started yet. Get ready!</p>
+                    
+                    <div class="mb-4">
+                        <h3 class="mb-3">Event Starts In:</h3>
+                        <div id="countdown" class="d-flex justify-content-center gap-3 flex-wrap">
+                            <div class="countdown-box">
+                                <div class="countdown-value" id="days">0</div>
+                                <div class="countdown-label">Days</div>
+                            </div>
+                            <div class="countdown-box">
+                                <div class="countdown-value" id="hours">0</div>
+                                <div class="countdown-label">Hours</div>
+                            </div>
+                            <div class="countdown-box">
+                                <div class="countdown-value" id="minutes">0</div>
+                                <div class="countdown-label">Minutes</div>
+                            </div>
+                            <div class="countdown-box">
+                                <div class="countdown-value" id="seconds">0</div>
+                                <div class="countdown-label">Seconds</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        <strong>Start Time:</strong> {{ start_time|format_datetime('%B %d, %Y at %H:%M') }}
+                        <small>({{ settings.get('timezone', 'UTC') }})</small>
+                    </div>
+                    
+                    <p class="text-muted small mt-4">
+                        <i class="bi bi-arrow-clockwise"></i> This page will automatically refresh when the event starts
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.countdown-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.countdown-value {
+    font-size: 3.5rem;
+    font-weight: bold;
+    color: #0d6efd;
+    line-height: 1;
+    margin-bottom: 5px;
+}
+
+.countdown-label {
+    font-size: 0.9rem;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 500;
+}
+
+@media (max-width: 576px) {
+    .countdown-value {
+        font-size: 2.5rem;
+    }
+    
+    .countdown-label {
+        font-size: 0.8rem;
+    }
+}
+</style>
+
+<script>
+// Parse start time from server (converted to platform timezone, then to ISO for JS)
+const startTime = new Date("{{ (start_time|to_platform_tz).strftime('%Y-%m-%dT%H:%M:%S') }}");
+
+let countdownInterval = null;
+let pollInterval = null;
+let hasRedirected = false;
+let lastRedirectTime = 0;
+
+function updateCountdown() {
+    const now = new Date();
+    const diff = startTime - now;
+    
+    if (diff <= 0) {
+        // Event has started! Stop all intervals and redirect once
+        if (!hasRedirected) {
+            hasRedirected = true;
+            lastRedirectTime = Date.now();
+            if (countdownInterval) clearInterval(countdownInterval);
+            if (pollInterval) clearInterval(pollInterval);
+            // Add a small delay to allow server to catch up
+            setTimeout(() => {
+                window.location.href = "{{ return_url }}";
+            }, 1000);
+        }
+        return;
+    }
+    
+    // Calculate time components
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    // Update display
+    document.getElementById('days').textContent = days;
+    document.getElementById('hours').textContent = hours.toString().padStart(2, '0');
+    document.getElementById('minutes').textContent = minutes.toString().padStart(2, '0');
+    document.getElementById('seconds').textContent = seconds.toString().padStart(2, '0');
+}
+
+// Update countdown immediately and every second
+updateCountdown();
+countdownInterval = setInterval(updateCountdown, 1000);
+
+// Also check every 30 seconds if we should reload (in case of clock skew)
+pollInterval = setInterval(() => {
+    if (!hasRedirected) {
+        fetch("{{ return_url }}")
+            .then(response => {
+                if (response.ok && !response.url.includes('countdown')) {
+                    if (!hasRedirected) {
+                        hasRedirected = true;
+                        lastRedirectTime = Date.now();
+                        clearInterval(countdownInterval);
+                        clearInterval(pollInterval);
+                        // Add a small delay to allow page to load
+                        setTimeout(() => {
+                            window.location.href = "{{ return_url }}";
+                        }, 1000);
+                    }
+                }
+            })
+            .catch(() => {});
+    }
+}, 30000);
+
+// Prevent back-navigation to countdown page after redirect
+window.addEventListener('load', function() {
+    if (hasRedirected) {
+        // Replace history so back button doesn't return to countdown
+        history.replaceState(null, null, "{{ return_url }}");
+    }
+});
+</script>
+{% endblock %}

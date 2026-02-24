@@ -631,7 +631,21 @@ def submit_flag(challenge_id):
         ip_address=request.remote_addr
     )
     submission.save()
-    
+
+    # Mirror this submission attempt to the graph (fire-and-forget, non-fatal)
+    try:
+        _graph = getattr(current_app, 'graph', None)
+        if _graph and _graph.is_available():
+            _graph.record_submission(
+                entity_id=str(team_id) if team_id else str(current_user.id),
+                raw_flag=submitted_flag,
+                challenge_id=str(challenge_id),
+                is_correct=is_correct,
+                is_team=bool(team_id),
+            )
+    except Exception:
+        pass
+
     if is_correct:
         # DETECT exact regex-based flag sharing (admin-controlled per-challenge)
         try:
@@ -829,7 +843,23 @@ def submit_flag(challenge_id):
             is_first_blood=is_first_blood
         )
         solve.save()
-        
+
+        # Mirror this solve to the graph (fire-and-forget, non-fatal)
+        try:
+            _graph = getattr(current_app, 'graph', None)
+            if _graph and _graph.is_available():
+                _graph.record_solve(
+                    entity_id=str(team_id) if team_id else str(current_user.id),
+                    challenge_id=str(challenge.id),
+                    challenge_name=challenge.name,
+                    challenge_category=challenge.category,
+                    is_team=bool(team_id),
+                    points=points,
+                    is_first_blood=is_first_blood,
+                )
+        except Exception:
+            pass
+
         # Auto-stop container if challenge has one (cleanup after solve)
         if challenge.docker_enabled:
             try:

@@ -60,9 +60,24 @@ def create_team():
         # Add creator as team member and captain
         current_user.team = team
         current_user.is_team_captain = True
-        
+
         current_user.save()
-        
+
+        # Mirror team creation & membership to graph (fire-and-forget, non-fatal)
+        try:
+            from flask import current_app
+            _graph = getattr(current_app, 'graph', None)
+            if _graph and _graph.is_available():
+                _graph.sync_team(str(team.id), team.name)
+                _graph.record_team_join(
+                    user_id=str(current_user.id),
+                    username=current_user.username,
+                    team_id=str(team.id),
+                    team_name=team.name,
+                )
+        except Exception:
+            pass
+
         flash(f'Team "{team_name}" created successfully! Share your invite code: {invite_code}', 'success')
         return redirect(url_for('teams.view_team', team_id=team.id))
     
@@ -162,7 +177,21 @@ def confirm_join_team():
     # Add user to team
     current_user.team = team
     current_user.save()
-    
+
+    # Mirror team membership to graph (fire-and-forget, non-fatal)
+    try:
+        from flask import current_app
+        _graph = getattr(current_app, 'graph', None)
+        if _graph and _graph.is_available():
+            _graph.record_team_join(
+                user_id=str(current_user.id),
+                username=current_user.username,
+                team_id=str(team.id),
+                team_name=team.name,
+            )
+    except Exception:
+        pass
+
     flash(f'Successfully joined team "{team.name}"!', 'success')
     return jsonify({
         'success': True,
@@ -199,7 +228,21 @@ def join_team(team_id):
     # Add user to team
     current_user.team = team
     current_user.save()
-    
+
+    # Mirror team membership to graph (fire-and-forget, non-fatal)
+    try:
+        from flask import current_app
+        _graph = getattr(current_app, 'graph', None)
+        if _graph and _graph.is_available():
+            _graph.record_team_join(
+                user_id=str(current_user.id),
+                username=current_user.username,
+                team_id=str(team.id),
+                team_name=team.name,
+            )
+    except Exception:
+        pass
+
     return jsonify({
         'success': True,
         'message': f'Successfully joined team "{team.name}"'

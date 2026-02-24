@@ -17,6 +17,10 @@ services:
       - WORKERS=8
       - LOG_FOLDER=/var/log/blackbox
       - REVERSE_PROXY=true
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-blackbox_neo4j}
+      - NEO4J_ENABLED=${NEO4J_ENABLED:-true}
     entrypoint: ["/bin/bash", "/opt/blackbox/docker-entrypoint.sh"]
     # volumes:
     #   - .:/opt/blackbox:ro
@@ -77,6 +81,27 @@ services:
       retries: 5
       start_period: 30s
 
+  neo4j:
+    container_name: blackbox-neo4j
+    image: neo4j:5.18-community
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP Browser UI
+      - "7687:7687"   # Bolt protocol (driver)
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-blackbox_neo4j}
+    volumes:
+      - neo4j_data:/data
+    networks:
+      default:
+      internal:
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   cache:
     container_name: blackbox-cache
     image: redis:7-alpine
@@ -96,6 +121,8 @@ volumes:
   mongo_data:
     driver: local
   redis_data:
+    driver: local
+  neo4j_data:
     driver: local
   uploads:
     driver: local

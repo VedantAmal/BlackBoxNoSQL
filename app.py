@@ -44,7 +44,11 @@ def create_app(config_name=None):
     
     # Initialize security features (CSRF, security headers, etc.)
     init_security(app)
-    
+
+    # Initialize Neo4j graph service (optional — app boots normally if unavailable)
+    from services.graph_service import init_graph
+    init_graph(app)
+
     # Initialize Flask-Login
     login_manager = LoginManager()
     login_manager.init_app(app)
@@ -204,13 +208,21 @@ def create_app(config_name=None):
         
         # Overall health
         is_healthy = db_status == 'healthy' and redis_status == 'healthy'
-        
+
+        # Check Neo4j (optional — not counted towards overall health)
+        graph = getattr(app, 'graph', None)
+        if graph is None:
+            neo4j_status = 'disabled'
+        else:
+            neo4j_status = 'healthy' if graph.is_available() else 'unavailable'
+
         health_data = {
             'status': 'healthy' if is_healthy else 'unhealthy',
             'timestamp': datetime.utcnow().isoformat(),
             'checks': {
                 'database': db_status,
-                'redis': redis_status
+                'redis': redis_status,
+                'neo4j': neo4j_status
             },
             'config': {
                 'workers': os.getenv('WORKERS', '1'),

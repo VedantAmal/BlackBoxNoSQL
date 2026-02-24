@@ -79,6 +79,14 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
     SESSION_COOKIE_NAME = 'blackbox_session'
     
+    # Neo4j Graph Database (optional — enhances prerequisite tracking,
+    # anti-cheat flag-sharing detection, and solve analytics).
+    # Set NEO4J_ENABLED=false to disable entirely without removing the service.
+    NEO4J_ENABLED = os.getenv('NEO4J_ENABLED', 'true').lower() == 'true'
+    NEO4J_URI = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+    NEO4J_USER = os.getenv('NEO4J_USER', 'neo4j')
+    NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD', 'blackbox_neo4j')
+
     # Security
     # These headers are managed by security_utils.py
     # Additional security settings can be added here
